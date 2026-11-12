@@ -1,6 +1,6 @@
 """Sniff fields by position: one sniff field per arena bin, laid out as the 3 x 7 arena map.
 
-Companion to position_raster.py / position_field.ipynb. The sniffs of one behavioral epoch (appetitive
+Companion to position_raster.py / position_field.ipynb. The sniffs of one behavioral epoch (search
 by default, as in position_locking.py) are split by the nose's position bin at the inhalation - the
 3 (x) x 7 (y) bins of position_locking.py - and each bin gets the sniff field of sniff_raster.py
 (firing rate by latency from inhalation and sniff frequency, sniff_locking.sniff_field) over its own
@@ -24,7 +24,7 @@ import position_locking as pl
 from position_raster import MIN_SPIKES_PEAK
 from sniff_locking import FIELD_BWIDTH, FIELD_FREQ_EDGES, FS, WINDOW_MS, sniff_field
 
-EPOCH = 'appetitive'
+EPOCH = 'search'
 DEFLECTION_COLOR = 'k'
 PANEL_W_IN = 2.4  # width of one arena bin's panel; heights follow the bin's aspect ratio
 

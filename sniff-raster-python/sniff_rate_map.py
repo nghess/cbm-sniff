@@ -16,7 +16,7 @@ frame, restricted to the tracked window). Sniffs are the good inhalations of sni
 same bins: occupancy >= spatial_info.MIN_OCCUPANCY_S and >= MIN_SNIFFS_PER_BIN sniffs. Maps are not
 smoothed.
 
-Scores per unit and epoch (all / appetitive / consummatory), both Skaggs information in bits/spike:
+Scores per unit and epoch (all / search / retrieval), both Skaggs information in bits/spike:
   - si_rate: the usual SI, p_i = occupancy fraction, r_i = spikes / s. It is the KL divergence of the
     spikes' spatial distribution from the occupancy distribution.
   - si_sniff: the same with sniffs as the occupancy, p_i = fraction of sniffs, r_i = spikes / sniff,

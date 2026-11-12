@@ -1,7 +1,7 @@
 """Sniff rasters sorted by position instead of by sniff duration.
 
 Companion to flip_state_plots.py / position_raster.ipynb. One row per sniff of one behavioral epoch
-(appetitive by default), spikes plotted against latency from inhalation. Rows are grouped by the nose's
+(search by default), spikes plotted against latency from inhalation. Rows are grouped by the nose's
 bin along the arena's long (y) axis at the inhalation - the same 7 bins as the 'latency profile by y
 position' panels of flip_state_plots.py - and sorted by sniff duration within each bin. There is one
 raster for all sniffs and one per trial flip_state (0/1/2).

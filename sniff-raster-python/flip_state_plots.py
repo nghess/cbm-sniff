@@ -11,7 +11,7 @@ Companion to position_locking.py / position_locking.ipynb. For every unit scored
 The latency profiles pool all sniff frequencies.
 
 Usage:
-    python flip_state_plots.py [--epoch appetitive] [--regions ob hc] [--sessions 9005/x3 ...] [--out-dir DIR]
+    python flip_state_plots.py [--epoch search] [--regions ob hc] [--sessions 9005/x3 ...] [--out-dir DIR]
 """
 import argparse
 import os
@@ -48,7 +48,7 @@ def title_stats(info_z=None, timing_z=None):
 class FlipSession:
     """One session's sniffs (restricted to an epoch), tracked frames and spikes, shared by its units."""
 
-    def __init__(self, mouse, session, epoch='appetitive', region='ob'):
+    def __init__(self, mouse, session, epoch='search', region='ob'):
         self.mouse, self.session, self.epoch, self.region = str(mouse), session, epoch, region
         _, self.spike_times, self.clusters = pl.load_units(self.mouse, session, region)
         self.sess = pl.Session(self.mouse, session, last_ms=(int(self.spike_times[-1]) + 15) // 30,
@@ -59,7 +59,7 @@ class FlipSession:
                          usecols=['timestamp_ms', 'nose_x', 'nose_y', 'flip_state', 'trial_number', *epoch_cols])
         ev = ev.sort_values('timestamp_ms')
         ev['epoch'] = si.compute_epochs(*(ev[c].to_numpy() for c in epoch_cols), ev['timestamp_ms'].to_numpy(),
-                                        si.FEEDING_GAP_TOLERANCE_S)
+                                        si.CONSUMPTION_GAP_TOLERANCE_S)
         ev = ev.dropna(subset=['timestamp_ms', 'nose_x', 'nose_y'])
         self.frame_ms = ev['timestamp_ms'].to_numpy(float)
         self.flip, self.trial = ev['flip_state'].to_numpy(), ev['trial_number'].to_numpy()
@@ -175,7 +175,7 @@ def plot_session(args):
 
 def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument('--epoch', default='appetitive', choices=list(si.EPOCH_OUTPUTS))
+    ap.add_argument('--epoch', default='search', choices=list(si.EPOCH_OUTPUTS))
     ap.add_argument('--regions', nargs='*', default=['ob', 'hc'])
     ap.add_argument('--sessions', nargs='*', help='only these <mouse>/<session> (default: all scored sessions)')
     ap.add_argument('--out-dir', default=PNG_DIR)

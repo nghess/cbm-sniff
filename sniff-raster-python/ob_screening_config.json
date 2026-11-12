@@ -1,0 +1,101 @@
+{
+  "_note": "Thresholds for ob_screening.py. Nothing here uses spatial or behavioral tuning. SNR cutoffs were recalibrated after the first run (2026-11-04): the bandpassed OB background is ~30 uV, so median SNR is 2.5.",
+  "stage0": {
+    "min_spikes": 100,
+    "refractory_ms": 1.5,
+    "max_isi_violation": 0.01,
+    "min_isolation_distance": 20,
+    "max_l_ratio": 0.1,
+    "n_pcs": 3,
+    "max_pc_spikes": 50000,
+    "drift_bins": 10,
+    "min_spikes_per_bin": 10,
+    "max_amplitude_drift": 0.5,
+    "uniform_min_ratio": 0.9,
+    "uniform_min_r": 0.98
+  },
+  "waveform": {
+    "bandpass_hz": [
+      300,
+      6000
+    ],
+    "max_spikes": 500,
+    "window_ms": [
+      -1.0,
+      2.0
+    ],
+    "pad_ms": 10,
+    "noise_chunks": 20,
+    "noise_chunk_s": 1,
+    "max_positive_ratio": 1.0,
+    "max_pre_ratio": 0.5,
+    "footprint_wire_frac": 0.3,
+    "small_snr": 1.5,
+    "width_outlier_z": 3,
+    "reference": {
+      "min_snr": 2,
+      "max_isi_violation": 0.02,
+      "min_isolation_distance": 20,
+      "max_l_ratio": 0.1,
+      "min_units_per_mouse": 10,
+      "min_units": 10
+    }
+  },
+  "lfp": {
+    "gamma_hz": [
+      40,
+      100
+    ],
+    "total_hz": [
+      2,
+      200
+    ],
+    "line_hz": [
+      [
+        55,
+        65
+      ],
+      [
+        115,
+        125
+      ],
+      [
+        175,
+        185
+      ]
+    ],
+    "nperseg": 1024,
+    "sniff_window_ms": [
+      -100,
+      400
+    ],
+    "baseline_ms": [
+      -100,
+      0
+    ],
+    "slow_ms": [
+      0,
+      200
+    ],
+    "max_sniffs": 5000,
+    "low_gamma_quantile": 0.25,
+    "shape_ms": [
+      0,
+      300
+    ],
+    "max_reversal_r": 0
+  },
+  "gl_signatures": {
+    "sniff_dur_ms": [
+      300,
+      500
+    ],
+    "hist_window_ms": 300,
+    "hist_bin_ms": 10,
+    "n_random": 200,
+    "alpha": 0.05,
+    "early_peak_ms": 80,
+    "burst_isi_ms": 10,
+    "max_burst_frac": 0.3
+  }
+}

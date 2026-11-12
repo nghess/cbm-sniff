@@ -25,12 +25,12 @@ fit by two Poisson log-linear models:
     interaction_corrected = I - mean(null), interaction_z, interaction_p (floor 1/(n_shuffle+1)),
     interaction_frac = interaction_corrected / lock_bits_per_spike.
 
-Epochs (--epochs, default appetitive consummatory): sniffs are restricted to one behavioral epoch
+Epochs (--epochs, default search retrieval): sniffs are restricted to one behavioral epoch
 (spatial_info.compute_epochs, as in cluster-states-viewer), keeping only sniffs whose inhalation and
-window end both fall in it, so feeding/drinking never enters the counts or the null.
+window end both fall in it, so consumption/drinking never enters the counts or the null.
 
 Usage:
-    python position_locking.py [--sessions 9000/o2 ...] [--regions ob] [--epochs appetitive consummatory all]
+    python position_locking.py [--sessions 9000/o2 ...] [--regions ob] [--epochs search retrieval all]
                                [--n-shuffle 200] [--out FILE]
 """
 import argparse
@@ -43,7 +43,7 @@ import numpy as np
 import pandas as pd
 
 from sniff_locking import SNIFF_DIR, KS_ROOT, WINDOW_MS, SEED, load_sniffs, assign_spikes
-from spatial_info import EPOCH_OUTPUTS, FEEDING_GAP_TOLERANCE_S, compute_epochs
+from spatial_info import EPOCH_OUTPUTS, CONSUMPTION_GAP_TOLERANCE_S, compute_epochs
 
 EVENTS_DIR = 'E:/cbm-odor/events/'  # <mouse>/<session>/events.csv
 OUT_FILE = 'E:/cbm-odor/sniff/position_locking.csv'
@@ -80,7 +80,7 @@ class Session:
                          usecols=['timestamp_ms', 'nose_x', 'nose_y', *epoch_cols]).sort_values('timestamp_ms')
         # epochs come from the full event stream, before untracked frames are dropped (as in spatial_info.py)
         ev['epoch'] = compute_epochs(*(ev[c].to_numpy() for c in epoch_cols),
-                                     ev['timestamp_ms'].to_numpy(), FEEDING_GAP_TOLERANCE_S)
+                                     ev['timestamp_ms'].to_numpy(), CONSUMPTION_GAP_TOLERANCE_S)
         ev = ev.dropna(subset=['timestamp_ms', 'nose_x', 'nose_y'])
         frame_ms = ev['timestamp_ms'].to_numpy(float)
         frame_epoch = ev['epoch'].to_numpy()

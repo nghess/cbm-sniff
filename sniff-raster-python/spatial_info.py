@@ -21,8 +21,8 @@ Clusters under MIN_SPIKES whole-session spikes (the viewer excludes these) keep 
 NaN metrics, so the row set still matches sniff_locking.csv.
 
 Per-epoch SI/SSI (one extra CSV per EPOCH_OUTPUTS entry, <out>_<epoch>.csv, same rows and columns):
-  - frames are labeled appetitive / consummatory / feeding exactly as in cluster-states-viewer
-    (place_field.compute_epochs, config.FEEDING_GAP_TOLERANCE_S), on the full event stream before
+  - frames are labeled search / retrieval / consumption exactly as in cluster-states-viewer
+    (place_field.compute_epochs, config.CONSUMPTION_GAP_TOLERANCE_S), on the full event stream before
     untracked frames are dropped;
   - a spike belongs to the epoch of its nearest tracked frame; occupancy, p_i and visited bins use
     only that epoch's frames (frame interval from the whole session, as in the viewer);
@@ -59,41 +59,41 @@ MIN_OCCUPANCY_S = 0.1
 MIN_SPIKES = 250
 N_PERMUTATIONS = 1000
 # epochs, from cluster-states-viewer (place_field.py, config.py)
-EPOCH_APPETITIVE, EPOCH_CONSUMMATORY, EPOCH_FEEDING = range(3)
-EPOCH_OUTPUTS = {'appetitive': EPOCH_APPETITIVE, 'consummatory': EPOCH_CONSUMMATORY}
-FEEDING_GAP_TOLERANCE_S = 0.5
+EPOCH_SEARCH, EPOCH_RETRIEVAL, EPOCH_CONSUMPTION = range(3)
+EPOCH_OUTPUTS = {'search': EPOCH_SEARCH, 'retrieval': EPOCH_RETRIEVAL}
+CONSUMPTION_GAP_TOLERANCE_S = 0.5
 
 
 def compute_epochs(reward_state, poke_left, poke_right, iti, frame_ms, gap_tolerance_s):
-    """Epoch of every event row, as in cluster-states-viewer: appetitive -> consummatory on the
-    reward_state rising edge, consummatory -> feeding on the next poke rising edge, feeding ->
-    appetitive on the next iti rising edge; feeding rows more than gap_tolerance_s from the nearest
-    poke in their bout go back to appetitive."""
+    """Epoch of every event row, as in cluster-states-viewer: search -> retrieval on the
+    reward_state rising edge, retrieval -> consumption on the next poke rising edge, consumption ->
+    search on the next iti rising edge; consumption rows more than gap_tolerance_s from the nearest
+    poke in their bout go back to search."""
     reward_state = np.asarray(reward_state, dtype=bool)
     poke = np.asarray(poke_left, dtype=bool) | np.asarray(poke_right, dtype=bool)
     iti = np.asarray(iti, dtype=bool)
     frame_ms = np.asarray(frame_ms, dtype=float)
 
     epoch = np.empty(len(reward_state), dtype=np.int8)
-    state = EPOCH_APPETITIVE
+    state = EPOCH_SEARCH
     prev_rs = prev_pk = prev_it = False
     for i, (rs, pk, it) in enumerate(zip(reward_state, poke, iti)):
-        if state == EPOCH_APPETITIVE and rs and not prev_rs:
-            state = EPOCH_CONSUMMATORY
-        elif state == EPOCH_CONSUMMATORY and pk and not prev_pk:
-            state = EPOCH_FEEDING
-        elif state == EPOCH_FEEDING and it and not prev_it:
-            state = EPOCH_APPETITIVE
+        if state == EPOCH_SEARCH and rs and not prev_rs:
+            state = EPOCH_RETRIEVAL
+        elif state == EPOCH_RETRIEVAL and pk and not prev_pk:
+            state = EPOCH_CONSUMPTION
+        elif state == EPOCH_CONSUMPTION and it and not prev_it:
+            state = EPOCH_SEARCH
         epoch[i] = state
         prev_rs, prev_pk, prev_it = rs, pk, it
 
-    is_feeding = epoch == EPOCH_FEEDING
-    if is_feeding.any():
-        diff = np.diff(is_feeding.astype(np.int8))
+    is_consumption = epoch == EPOCH_CONSUMPTION
+    if is_consumption.any():
+        diff = np.diff(is_consumption.astype(np.int8))
         starts, ends = np.where(diff == 1)[0] + 1, np.where(diff == -1)[0] + 1
-        if is_feeding[0]:
+        if is_consumption[0]:
             starts = np.r_[0, starts]
-        if is_feeding[-1]:
+        if is_consumption[-1]:
             ends = np.r_[ends, len(epoch)]
         for start, end in zip(starts, ends):
             seg_t = frame_ms[start:end]
@@ -102,7 +102,7 @@ def compute_epochs(reward_state, poke_left, poke_right, iti, frame_ms, gap_toler
                 continue
             idx = np.clip(np.searchsorted(poke_t, seg_t), 1, len(poke_t) - 1)
             nearest_gap = np.minimum(seg_t - poke_t[idx - 1], poke_t[idx] - seg_t)
-            epoch[start + np.where(nearest_gap > gap_tolerance_s * 1000.0)[0]] = EPOCH_APPETITIVE
+            epoch[start + np.where(nearest_gap > gap_tolerance_s * 1000.0)[0]] = EPOCH_SEARCH
     return epoch
 
 
@@ -157,7 +157,7 @@ class Session:
         ev = ev.sort_values(TIMESTAMP_COLUMN)
         # epochs come from the full event stream, before untracked frames are dropped
         ev['epoch'] = compute_epochs(*(ev[c].to_numpy() for c in epoch_cols),
-                                     ev[TIMESTAMP_COLUMN].to_numpy(), FEEDING_GAP_TOLERANCE_S)
+                                     ev[TIMESTAMP_COLUMN].to_numpy(), CONSUMPTION_GAP_TOLERANCE_S)
         ev = ev.dropna(subset=[TIMESTAMP_COLUMN, x_col, y_col])
         self.frame_ms = ev[TIMESTAMP_COLUMN].to_numpy(float)
         self.frame_epoch = ev['epoch'].to_numpy()
