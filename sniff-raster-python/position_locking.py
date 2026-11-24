@@ -26,7 +26,7 @@ fit by two Poisson log-linear models:
     interaction_frac = interaction_corrected / lock_bits_per_spike.
 
 Epochs (--epochs, default search retrieval): sniffs are restricted to one behavioral epoch
-(spatial_info.compute_epochs, as in cluster-states-viewer), keeping only sniffs whose inhalation and
+(cbmcore.label_epochs, through spatial_info.frame_epochs), keeping only sniffs whose inhalation and
 window end both fall in it, so consumption/drinking never enters the counts or the null.
 
 Usage:
@@ -43,7 +43,7 @@ import numpy as np
 import pandas as pd
 
 from sniff_locking import SNIFF_DIR, KS_ROOT, WINDOW_MS, SEED, load_sniffs, assign_spikes
-from spatial_info import EPOCH_OUTPUTS, CONSUMPTION_GAP_TOLERANCE_S, compute_epochs
+from spatial_info import EPOCH_COLUMNS, EPOCH_OUTPUTS, frame_epochs
 
 EVENTS_DIR = 'E:/cbm-odor/events/'  # <mouse>/<session>/events.csv
 OUT_FILE = 'E:/cbm-odor/sniff/position_locking.csv'
@@ -75,12 +75,10 @@ class Session:
         """epoch: None for every sniff, or a key of spatial_info.EPOCH_OUTPUTS to keep only sniffs whose
         inhalation and window end (inhalation + min(duration, WINDOW_MS)) both fall in that epoch."""
         locs, durs = load_sniffs(os.path.join(SNIFF_DIR, mouse, session, 'sniff_params.mat'))
-        epoch_cols = ['reward_state', 'poke_left', 'poke_right', 'iti']
         ev = pd.read_csv(os.path.join(EVENTS_DIR, mouse, session, 'events.csv'),
-                         usecols=['timestamp_ms', 'nose_x', 'nose_y', *epoch_cols]).sort_values('timestamp_ms')
+                         usecols=['timestamp_ms', 'nose_x', 'nose_y', *EPOCH_COLUMNS]).sort_values('timestamp_ms')
         # epochs come from the full event stream, before untracked frames are dropped (as in spatial_info.py)
-        ev['epoch'] = compute_epochs(*(ev[c].to_numpy() for c in epoch_cols),
-                                     ev['timestamp_ms'].to_numpy(), CONSUMPTION_GAP_TOLERANCE_S)
+        ev['epoch'] = frame_epochs(ev)
         ev = ev.dropna(subset=['timestamp_ms', 'nose_x', 'nose_y'])
         frame_ms = ev['timestamp_ms'].to_numpy(float)
         frame_epoch = ev['epoch'].to_numpy()
@@ -108,6 +106,9 @@ class Session:
         self.locs, self.durs = locs[ok], durs[ok]
         self.pos = np.searchsorted(self.pos_bins, pos[ok])  # 0..P-1 over kept bins
         self.n_pos = len(self.pos_bins)
+        if self.n_pos < 2:   # too few sniffs in this epoch to compare positions; score_region leaves the units unscored
+            self.dest = np.empty((0, self.locs.size), int)
+            return
 
         freq = 1e3 / self.durs
         self.freq_edges = np.quantile(freq, np.linspace(0, 1, N_FREQ + 1))

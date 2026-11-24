@@ -11,6 +11,8 @@ corresponds to CYCLE_HZ. Each spike in a kept cycle gets a phase from its positi
 linear in time: 0 deg = trough, 360 = next trough (the peak falls near 180; peak_phase_deg gives
 where on average).
 
+Only theta cycles wholly in the search epoch are scored (spatial_info.SearchFrames).
+
 For every hc unit that phy curation did not label noise this writes one row to OUT_DIR/theta_locking.csv:
   - channel, n_cycles, theta_hz (median kept-cycle frequency), peak_phase_deg, n_spikes_in_cycles,
     rate_in_cycles_hz
@@ -47,6 +49,7 @@ from scipy.fft import next_fast_len
 from scipy.signal import butter, find_peaks, hilbert, sosfiltfilt
 
 from sniff_locking import skaggs_info
+from spatial_info import SearchFrames
 
 ROOT = 'E:/cbm-odor/'
 OUT_DIR = 'E:/cbm-odor/theta/'
@@ -198,7 +201,11 @@ def score_session(args):
     if not os.path.exists(lfp_file):
         print(f'{mouse}/{session}: no hc_lfp.npy, skipping', flush=True)
         return []
+    if not os.path.exists(os.path.join(ROOT, 'events', mouse, session, 'events.csv')):
+        print(f'{mouse}/{session}: no events.csv, so no search epoch, skipping', flush=True)
+        return []
     lfp = np.load(lfp_file, mmap_mode='r')
+    frames = SearchFrames(mouse, session)
     spike_times = np.load(os.path.join(ks_dir, 'spike_times.npy')).ravel()
     clusters = np.load(os.path.join(ks_dir, 'spike_clusters.npy')).ravel()
     info = pd.read_csv(os.path.join(ks_dir, 'cluster_info.tsv'), sep='\t')
@@ -213,7 +220,9 @@ def score_session(args):
     for _, u in units.iterrows():
         cl, ch = int(u['cluster_id']), int(u['ch'])
         if ch not in cache:
-            cache[ch] = theta_cycles(np.asarray(lfp[ch]))
+            starts, durs, peak_phase, th = theta_cycles(np.asarray(lfp[ch]))
+            in_search = frames.mask(starts, starts + durs)
+            cache[ch] = starts[in_search], durs[in_search], peak_phase, th
         starts, durs, peak_phase, th = cache[ch]
         spikes = np.sort(spike_times[clusters == cl]).astype(float) / 30
         rng = np.random.default_rng([SEED, zlib.crc32(f'{mouse}/{session}/hc/{cl}'.encode())])

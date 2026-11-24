@@ -43,7 +43,7 @@ Stage B, not glomerular layer. Without depth this can only make units ambiguous.
   - osn_terminal_like (exclude, with the waveform criterion it requires): an axonal waveform (positive or
     triphasic), an early sniff peak (<= early_peak_ms, p < alpha) and no sniff-locked dip (an OSN terminal is
     excited only). Early firing on its own never counts against a unit, since tufted cells fire early.
-  The sniff histogram is spikes 0-hist_window_ms after inhalation onset (i_locs) for sniffs 300-500 ms long,
+  The sniff histogram is spikes 0-hist_window_ms after inhalation onset (i_locs) for search-epoch sniffs 300-500 ms long,
   tested against random onsets from permuted sniff intervals, as in mt_classifier.py.
 
 screen_label is exclude if any exclude criterion fails, else ambiguous if any ambiguous one does, else include.
@@ -74,6 +74,7 @@ from scipy.stats import chi2
 from make_hc_lfp import CHANNELS, FS, GAIN, N_CH, raw_file
 from mt_classifier import random_onsets
 from sniff_locking import KS_ROOT, SEED, load_sniffs
+from spatial_info import SearchFrames
 
 ROOT = 'E:/cbm-odor/'
 SNIFF_DIR = 'E:/cbm-odor/sniff/'
@@ -295,12 +296,14 @@ def screen_session(args):
     all_locs, all_durs = load_sniffs(os.path.join(SNIFF_DIR, mouse, session, 'sniff_params.mat'))
     last = (int(spike_times[-1]) + 15) // 30
     locs, durs = all_locs[all_locs < last], all_durs[all_locs < last]
-    sel = (durs >= g['sniff_dur_ms'][0]) & (durs <= g['sniff_dur_ms'][1])
+    frames = SearchFrames(mouse, session)     # sniff measures use search only; unit quality uses the whole recording
+    sel = (durs >= g['sniff_dur_ms'][0]) & (durs <= g['sniff_dur_ms'][1]) & frames.mask(locs, locs + g['hist_window_ms'])
     on = locs[sel]
     rand = []
     for _ in range(g['n_random']):
         r_on, r_dur = random_onsets(locs, durs, rng)
         r_sel = (r_dur >= g['sniff_dur_ms'][0]) & (r_dur <= g['sniff_dur_ms'][1]) & (r_on + g['hist_window_ms'] < last)
+        r_sel &= frames.mask(r_on, r_on + g['hist_window_ms'])
         rand.append(r_on[r_sel])
 
     t_span = (spike_times[0] / 30, spike_times[-1] / 30)
@@ -337,7 +340,8 @@ def screen_session(args):
         rows.append(row)
         hists.append(h)
 
-    lfp_rows, sta = lfp_features(mouse, session, all_locs, shanks, cfg['lfp'], rng)
+    w0, w1 = cfg['lfp']['sniff_window_ms']
+    lfp_rows, sta = lfp_features(mouse, session, all_locs[frames.mask(all_locs + w0, all_locs + w1)], shanks, cfg['lfp'], rng)
     return rows, wfs, hists, lfp_rows, sta
 
 

@@ -22,7 +22,8 @@ unit. Units in the training set get their leave-one-out posterior.
 cell_type is 'tufted' or 'mitral' when the discriminant's posterior for that type is at least
 CALL_POSTERIOR, otherwise 'other' (other_reason: few_spikes, not_locked or ambiguous).
 
-Inhalation onsets are i_locs of the MATLAB sniff params: the thermistor's temperature maximum,
+Only sniffs whose whole histogram window lies in the search epoch are used (spatial_info.SearchFrames), for the real
+and the random onsets alike. Inhalation onsets are i_locs of the MATLAB sniff params: the thermistor's temperature maximum,
 i.e. the zero-flow point at the start of inhalation, which is how the paper defines onset.
 
 Outputs (E:/cbm-odor/sniff/):
@@ -49,6 +50,7 @@ from sklearn.discriminant_analysis import LinearDiscriminantAnalysis
 from sklearn.model_selection import LeaveOneOut, cross_val_predict
 
 from sniff_locking import KS_ROOT, SEED, load_sniffs
+from spatial_info import SearchFrames
 
 SNIFF_DIR = 'E:/cbm-odor/sniff/'  # <mouse>/<session>/sniff_params.mat
 OUT_FILE = 'E:/cbm-odor/sniff/mt_cell_inventory.csv'
@@ -106,14 +108,18 @@ def score_session(args):
     # as in sniff_locking.py: only sniffs before the last spike
     last = (int(spike_times[-1]) + 15) // 30
     locs, durs = all_locs[all_locs < last], all_durs[all_locs < last]
-    sel = (durs >= DUR_RANGE[0]) & (durs <= DUR_RANGE[1])
+    frames = SearchFrames(mouse, session)
+    sel = (durs >= DUR_RANGE[0]) & (durs <= DUR_RANGE[1]) & frames.mask(locs, locs + WINDOW_MS)
     on, dur = locs[sel], durs[sel]
+    if on.size == 0:
+        return [], []
 
     rng = np.random.default_rng([SEED, zlib.crc32(f'{mouse}/{session}/{REGION}/mt'.encode())])
     rand = []
     for _ in range(n_random):
         r_on, r_dur = random_onsets(locs, durs, rng)
         r_sel = (r_dur >= DUR_RANGE[0]) & (r_dur <= DUR_RANGE[1]) & (r_on + WINDOW_MS < last)
+        r_sel &= frames.mask(r_on, r_on + WINDOW_MS)
         rand.append((r_on[r_sel], r_dur[r_sel]))
 
     rows, hists = [], []
@@ -266,7 +272,7 @@ def main():
     df, summary = classify(df, hists)
     df.to_csv(args.out, index=False)
     np.savez_compressed(os.path.splitext(args.out)[0].replace('mt_cell_inventory', 'mt_histograms') + '.npz',
-                        mouse=df['mouse'].astype(str).to_numpy(), session=df['session'].astype(str).to_numpy(),
+                        mouse=df['mouse'].to_numpy(dtype=str), session=df['session'].to_numpy(dtype=str),  # not object arrays, so no pickle to load
                         cluster=df['cluster'].to_numpy(), latency_ms=LATENCY_MS,
                         **{k: np.stack([h[k] for h in hists]) for k in hists[0]})
     pd.Series(summary, name='value').to_csv(args.out.replace('mt_cell_inventory', 'mt_classifier_summary'),

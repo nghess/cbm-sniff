@@ -16,7 +16,7 @@ frame, restricted to the tracked window). Sniffs are the good inhalations of sni
 same bins: occupancy >= spatial_info.MIN_OCCUPANCY_S and >= MIN_SNIFFS_PER_BIN sniffs. Maps are not
 smoothed.
 
-Scores per unit and epoch (all / search / retrieval), both Skaggs information in bits/spike:
+Scores per unit and epoch (search / retrieval), both Skaggs information in bits/spike:
   - si_rate: the usual SI, p_i = occupancy fraction, r_i = spikes / s. It is the KL divergence of the
     spikes' spatial distribution from the occupancy distribution.
   - si_sniff: the same with sniffs as the occupancy, p_i = fraction of sniffs, r_i = spikes / sniff,
@@ -47,7 +47,7 @@ import spatial_info as si
 from sniff_locking import SNIFF_DIR, load_sniffs
 
 OUT_FILE = 'E:/cbm-odor/sniff/sniff_rate_map.csv'  # one file per epoch: <out>_<epoch>.csv
-EPOCHS = ['all', *si.EPOCH_OUTPUTS]
+EPOCHS = list(si.EPOCH_OUTPUTS)
 MIN_SNIFFS_PER_BIN = 10
 N_SHUFFLE = 500
 
@@ -67,8 +67,7 @@ class MapSession(si.Session):
 
         self.frames, self.occ_s, self.n_sniffs, self.valid = {}, {}, {}, {}
         for epoch in EPOCHS:
-            frames = (np.arange(self.frame_ms.size) if epoch == 'all'
-                      else self.epoch_frames[epoch])
+            frames = self.epoch_frames[epoch]
             in_epoch = np.zeros(self.frame_ms.size, bool)
             in_epoch[frames] = True
             occ = self.occupancy(self.frame_bin[frames])[0]
@@ -142,7 +141,7 @@ class MapSession(si.Session):
         return flat.reshape(self.shape).T
 
 
-def plot_maps(ms, spikes_ms, epoch='all', title='', save_path=None, show=True):
+def plot_maps(ms, spikes_ms, epoch='search', title='', save_path=None, show=True):
     """Rate map (Hz), sniff-rate map (Hz) and spikes-per-sniff map of one unit side by side, with each
     valid bin's rate against its sniff rate. Bins left out (low occupancy or < MIN_SNIFFS_PER_BIN
     sniffs) are grey. Returns the flat maps (see MapSession.maps)."""

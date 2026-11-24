@@ -20,10 +20,9 @@ place_field_worker.py), with the same settings (cluster_viewer/config.py):
 Clusters under MIN_SPIKES whole-session spikes (the viewer excludes these) keep their row but get
 NaN metrics, so the row set still matches sniff_locking.csv.
 
-Per-epoch SI/SSI (one extra CSV per EPOCH_OUTPUTS entry, <out>_<epoch>.csv, same rows and columns):
-  - frames are labeled search / retrieval / consumption exactly as in cluster-states-viewer
-    (place_field.compute_epochs, config.CONSUMPTION_GAP_TOLERANCE_S), on the full event stream before
-    untracked frames are dropped;
+SI/SSI per epoch (one CSV per EPOCH_OUTPUTS entry, <out>_<epoch>.csv, same rows; the whole session is not scored):
+  - frames are labeled search / retrieval / consumption by cbmcore.label_epochs, on the full event
+    stream before untracked frames are dropped (UNSPLIT frames belong to no epoch);
   - a spike belongs to the epoch of its nearest tracked frame; occupancy, p_i and visited bins use
     only that epoch's frames (frame interval from the whole session, as in the viewer);
   - shuffles circularly shift the epoch's spikes within the epoch's own frames concatenated in time,
@@ -43,6 +42,8 @@ import numpy as np
 import pandas as pd
 from scipy.stats import norm
 
+from cbmcore import epochs, label_epochs
+
 SNIFF_DIR = 'E:/cbm-odor/sniff/'  # <mouse>/<session>/sniff_params.mat; defines the session list
 DATA_ROOT = 'E:/cbm-odor/'  # events/<mouse>/<session>/events.csv, <region>-ks/<mouse>/<session>/
 OUT_FILE = 'E:/cbm-odor/sniff/spatial_info.csv'
@@ -58,52 +59,42 @@ BIN_SIZE_PX = 129
 MIN_OCCUPANCY_S = 0.1
 MIN_SPIKES = 250
 N_PERMUTATIONS = 1000
-# epochs, from cluster-states-viewer (place_field.py, config.py)
-EPOCH_SEARCH, EPOCH_RETRIEVAL, EPOCH_CONSUMPTION = range(3)
-EPOCH_OUTPUTS = {'search': EPOCH_SEARCH, 'retrieval': EPOCH_RETRIEVAL}
-CONSUMPTION_GAP_TOLERANCE_S = 0.5
+# epochs, from cbmcore
+EPOCH_COLUMNS = list(epochs.COLUMNS)
+MAX_FRAME_GAP_MS = 100  # a stretch of time must start and end this close to a frame
+EPOCH_OUTPUTS = {'search': epochs.SEARCH, 'retrieval': epochs.RETRIEVAL}
 
 
-def compute_epochs(reward_state, poke_left, poke_right, iti, frame_ms, gap_tolerance_s):
-    """Epoch of every event row, as in cluster-states-viewer: search -> retrieval on the
-    reward_state rising edge, retrieval -> consumption on the next poke rising edge, consumption ->
-    search on the next iti rising edge; consumption rows more than gap_tolerance_s from the nearest
-    poke in their bout go back to search."""
-    reward_state = np.asarray(reward_state, dtype=bool)
-    poke = np.asarray(poke_left, dtype=bool) | np.asarray(poke_right, dtype=bool)
-    iti = np.asarray(iti, dtype=bool)
-    frame_ms = np.asarray(frame_ms, dtype=float)
+def frame_epochs(ev):
+    """cbmcore's epoch of every row of ev, in ev's row order (label_epochs needs Bonsai time order)."""
+    ordered = ev.sort_values('bonsai_ts', kind='stable')
+    return pd.Series(label_epochs(ordered), index=ordered.index).loc[ev.index].to_numpy()
 
-    epoch = np.empty(len(reward_state), dtype=np.int8)
-    state = EPOCH_SEARCH
-    prev_rs = prev_pk = prev_it = False
-    for i, (rs, pk, it) in enumerate(zip(reward_state, poke, iti)):
-        if state == EPOCH_SEARCH and rs and not prev_rs:
-            state = EPOCH_RETRIEVAL
-        elif state == EPOCH_RETRIEVAL and pk and not prev_pk:
-            state = EPOCH_CONSUMPTION
-        elif state == EPOCH_CONSUMPTION and it and not prev_it:
-            state = EPOCH_SEARCH
-        epoch[i] = state
-        prev_rs, prev_pk, prev_it = rs, pk, it
 
-    is_consumption = epoch == EPOCH_CONSUMPTION
-    if is_consumption.any():
-        diff = np.diff(is_consumption.astype(np.int8))
-        starts, ends = np.where(diff == 1)[0] + 1, np.where(diff == -1)[0] + 1
-        if is_consumption[0]:
-            starts = np.r_[0, starts]
-        if is_consumption[-1]:
-            ends = np.r_[ends, len(epoch)]
-        for start, end in zip(starts, ends):
-            seg_t = frame_ms[start:end]
-            poke_t = seg_t[poke[start:end]]
-            if poke_t.size == 0:
-                continue
-            idx = np.clip(np.searchsorted(poke_t, seg_t), 1, len(poke_t) - 1)
-            nearest_gap = np.minimum(seg_t - poke_t[idx - 1], poke_t[idx] - seg_t)
-            epoch[start + np.where(nearest_gap > gap_tolerance_s * 1000.0)[0]] = EPOCH_SEARCH
-    return epoch
+class SearchFrames:
+    """One session's frames, to test whether stretches of time lie wholly in the search epoch."""
+
+    def __init__(self, mouse, session):
+        ev = pd.read_csv(os.path.join(DATA_ROOT, 'events', str(mouse), session, 'events.csv'),
+                         usecols=[TIMESTAMP_COLUMN, *EPOCH_COLUMNS])
+        ev['epoch'] = frame_epochs(ev)
+        ev = ev.dropna(subset=[TIMESTAMP_COLUMN]).sort_values(TIMESTAMP_COLUMN, kind='stable')
+        self.t = ev[TIMESTAMP_COLUMN].to_numpy(float)
+        self.n_other = np.r_[0, np.cumsum(ev['epoch'].to_numpy() != epochs.SEARCH)]  # non-search frames before each frame
+
+    def _nearest(self, x):
+        i = np.clip(np.searchsorted(self.t, x), 1, len(self.t) - 1)
+        return np.where(np.abs(x - self.t[i - 1]) <= np.abs(self.t[i] - x), i - 1, i)
+
+    def mask(self, start_ms, end_ms):
+        """Bool per stretch: the frames nearest its start and end, and every frame between them, are search, and both
+        ends are within MAX_FRAME_GAP_MS of a frame."""
+        start_ms, end_ms = np.asarray(start_ms, float), np.asarray(end_ms, float)
+        if start_ms.size == 0:
+            return np.zeros(0, bool)
+        a, b = self._nearest(start_ms), self._nearest(end_ms)
+        near = (np.abs(self.t[a] - start_ms) <= MAX_FRAME_GAP_MS) & (np.abs(self.t[b] - end_ms) <= MAX_FRAME_GAP_MS)
+        return near & (self.n_other[b + 1] == self.n_other[a])
 
 
 def make_bin_edges(x_range, y_range, bin_size_px):
@@ -152,12 +143,10 @@ class Session:
 
     def __init__(self, events_path):
         x_col, y_col = f'{POSITION_POINT}_x', f'{POSITION_POINT}_y'
-        epoch_cols = ['reward_state', 'poke_left', 'poke_right', 'iti']
-        ev = pd.read_csv(events_path, usecols=lambda c: c in {TIMESTAMP_COLUMN, x_col, y_col, *epoch_cols})
+        ev = pd.read_csv(events_path, usecols=lambda c: c in {TIMESTAMP_COLUMN, x_col, y_col, *EPOCH_COLUMNS})
         ev = ev.sort_values(TIMESTAMP_COLUMN)
         # epochs come from the full event stream, before untracked frames are dropped
-        ev['epoch'] = compute_epochs(*(ev[c].to_numpy() for c in epoch_cols),
-                                     ev[TIMESTAMP_COLUMN].to_numpy(), CONSUMPTION_GAP_TOLERANCE_S)
+        ev['epoch'] = frame_epochs(ev)
         ev = ev.dropna(subset=[TIMESTAMP_COLUMN, x_col, y_col])
         self.frame_ms = ev[TIMESTAMP_COLUMN].to_numpy(float)
         self.frame_epoch = ev['epoch'].to_numpy()
@@ -243,7 +232,7 @@ def score_region(args):
                     p_gaussian=float(1 - norm.cdf(z)),
                     null_mean_bits_per_spike=null.mean(), null_sd_bits_per_spike=sd)
 
-    rows = {'all': [], **{name: [] for name in EPOCH_OUTPUTS}}
+    rows = {name: [] for name in EPOCH_OUTPUTS}
     for _, u in units.iterrows():
         cl = int(u['cluster_id'])
         spikes = spike_times[clusters == cl].astype(float) / FS_KHZ
@@ -252,13 +241,6 @@ def score_region(args):
         key = dict(mouse=mouse, session=session, region=region, cluster=cl, group=u['group'],
                    n_spikes=int((clusters == cl).sum()))
         enough = key['n_spikes'] >= MIN_SPIKES and spikes.size
-        row = dict(key, n_spikes_tracked=spikes.size, n_bins_visited=int(sess.visited.sum()))
-        if enough:
-            si = skaggs_si(sess.rate_map(spikes), sess.p_i)
-            rng = np.random.default_rng([SEED, zlib.crc32(f'{mouse}/{session}/{region}/{cl}'.encode())])
-            row.update(stats(si, sess.null_si(spikes, n_perm, rng)))
-        rows['all'].append(row)
-
         for name in EPOCH_OUTPUTS:
             occ, _, visited = sess.epoch_occ[name]
             row = dict(key, epoch_duration_s=float(occ.sum()), n_bins_visited=int(visited.sum()))
@@ -289,7 +271,7 @@ def main():
     with Pool(args.workers) as pool:
         results = list(pool.imap_unordered(score_region, jobs))
     base, ext = os.path.splitext(args.out)
-    outs = {'all': args.out, **{name: f'{base}_{name}{ext}' for name in EPOCH_OUTPUTS}}
+    outs = {name: f'{base}_{name}{ext}' for name in EPOCH_OUTPUTS}
     for name, path in outs.items():
         df = pd.DataFrame([r for res in results for r in res.get(name, [])])
         df = df.sort_values(['mouse', 'session', 'region', 'cluster'])

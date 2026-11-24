@@ -1,7 +1,7 @@
 """Python port of sniff-raster-matlab/sniff_raster.m.
 
 For every unit that phy curation did not label noise, in every session with saved
-sniff_params, this makes the same two figures as the MATLAB script:
+sniff_params, this makes the same two figures as the MATLAB script, from the sniffs wholly in the search epoch:
 
   - '<region> cl <id> SnF.png': the sniff field (firing rate by latency from inhalation
     and sniff frequency), with its max projections along time and frequency
@@ -31,6 +31,8 @@ from matplotlib.colors import ListedColormap
 from scipy.signal import savgol_filter
 
 from sniff_locking import FIELD_BWIDTH, FIELD_FREQ_EDGES, FS, KS_ROOT, REGIONS, WINDOW_MS, sniff_field
+
+from spatial_info import SearchFrames
 
 SNIFF_DIR = 'E:/cbm-odor/sniff_py/'  # <mouse>/<session>/sniff_params.npy from make_sniff_params.py (or .mat from the MATLAB one)
 OUT_DIR = 'E:/cbm-odor/sniff_py/png/'  # figures are saved to <mouse>/<session>/ in here
@@ -208,6 +210,8 @@ def plot_region(args):
     # only sniffs before the last spike (MATLAB's uint64 division rounds)
     last = (int(spike_times[-1]) + 15) // 30
     locs, durs = all_locs[all_locs < last], all_durs[all_locs < last]
+    in_search = SearchFrames(mouse, session).mask(locs, locs + np.minimum(durs, PMAX))
+    locs, durs = locs[in_search], durs[in_search]
     if locs.size == 0:
         return 0
 

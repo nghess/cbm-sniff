@@ -1,5 +1,8 @@
 """Plot each unit's activity split by trial flip_state (0/1/2) within one behavioral epoch.
 
+In the search epoch only active-search frames and sniffs (target set, ITI off) are split by state, because ITI frames
+carry the previous trial's flip_state.
+
 Companion to position_locking.py / position_locking.ipynb. For every unit scored by position_locking.py
 (see score_file) this saves, in <out-dir>/<region>/<mouse>/<session>/,
 <interaction_z>_<mouse>_<session>_<region>_cl<cluster>_<epoch>.png (title scores: see title_stats):
@@ -54,12 +57,12 @@ class FlipSession:
         self.sess = pl.Session(self.mouse, session, last_ms=(int(self.spike_times[-1]) + 15) // 30,
                                n_shuffle=0, epoch=epoch)
         # tracked frames with their epoch and flip state, as in spatial_info.Session / the viewer
-        epoch_cols = ['reward_state', 'poke_left', 'poke_right', 'iti']
         ev = pd.read_csv(os.path.join(pl.EVENTS_DIR, self.mouse, session, 'events.csv'),
-                         usecols=['timestamp_ms', 'nose_x', 'nose_y', 'flip_state', 'trial_number', *epoch_cols])
+                         usecols=['timestamp_ms', 'nose_x', 'nose_y', 'flip_state', 'trial_number', *si.EPOCH_COLUMNS])
         ev = ev.sort_values('timestamp_ms')
-        ev['epoch'] = si.compute_epochs(*(ev[c].to_numpy() for c in epoch_cols), ev['timestamp_ms'].to_numpy(),
-                                        si.CONSUMPTION_GAP_TOLERANCE_S)
+        ev['epoch'] = si.frame_epochs(ev)
+        not_active = (ev['epoch'] == si.epochs.SEARCH) & (ev['target_cell'].isna() | ev['iti'].isin([True, 'True']))
+        ev['flip_state'] = ev['flip_state'].where(~not_active, -1)   # in no flip state
         ev = ev.dropna(subset=['timestamp_ms', 'nose_x', 'nose_y'])
         self.frame_ms = ev['timestamp_ms'].to_numpy(float)
         self.flip, self.trial = ev['flip_state'].to_numpy(), ev['trial_number'].to_numpy()

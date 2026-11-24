@@ -1,15 +1,15 @@
-"""Whether each unit's firing rate depends on the 3-state sniff HMM state, beyond running, epoch, time and sniff rate.
+"""Whether each unit's firing rate during search depends on the 3-state sniff HMM state, beyond running, time and sniff rate.
 
 The states are cbm-hmm's per-session 3-state fits (HMM_DIR/<mouse>/<session>/sniff_hmm_3state.csv, one row per
 events.csv frame): 10 s bins described by their sniff-interval distribution and running speed, numbered by sniff
 rate within the session (0 slowest). cbm-hmm's 6_sniff_3state.ipynb guesses state 0 is at the port, 1 running,
 2 exploring (rearing, end walls). The HMM never sees spikes.
 
-Bins, z, sniff rate and covariates are sniff_rate_model.py's (250 ms bins, z-scored counts, MATLAB sniff params,
-cov = epoch + ns(speed, 3) + ns(time, 4)), and so are the folds and the cross-validated R^2. Each 250 ms bin takes
+Bins, z, sniff rate and covariates are sniff_rate_model.py's (250 ms search bins, z-scored counts, MATLAB sniff
+params, cov = ns(speed, 3) + ns(time, 4)), and so are the folds and the cross-validated R^2. Each 250 ms bin takes
 the state of its nearest frame; bins with no state (-1) are dropped. Models, all units of a session at once:
   state           z ~ state                                        (two dummies)
-  cov             epoch + ns(speed, 3) + ns(time, 4)
+  cov             ns(speed, 3) + ns(time, 4)
   cov_state       cov + state
   cov_spl         cov + ns(sniff, SNIFF_DF)
   cov_spl_state   cov_spl + state
@@ -25,12 +25,11 @@ asks whether the discrete state carries anything beyond a smoothed version of th
   p_state, p_state_sniff, p_state_slow: each dr2 against a null that circularly shifts the state sequence (by at
                     least MIN_SHIFT_S) against everything else, N_SHUFFLE times
   z_<k>, partial_z_<k>: mean z in state k, raw and as the residual after cov (in-sample)
-  search_z_<k>:     mean z in state k within search bins only (epoch held fixed)
   rate_hz_<k>, n_bins_<k>: firing rate and number of bins in state k
   pref_state:       the state with the largest partial_z
 
 State means are NaN where the state has fewer than MIN_STATE_BINS bins. Also writes a per-session CSV of each
-state's share of bins, sniff rate, speed and epochs.
+state's share of bins, sniff rate and speed.
 
 Usage:
     python sniff_hmm_model.py [--sessions 9008/x5 ...] [--out DIR] [--workers N]
@@ -42,7 +41,7 @@ from multiprocessing import Pool
 
 import numpy as np
 import pandas as pd
-from cbmcore import Session, epochs, load_units
+from cbmcore import Session, load_units
 
 from sniff_rate_model import (BIN_MS, EXPERIMENT, MAX_FRAME_GAP_MS, MIN_SPIKES, SNIFF_DF, SNIFF_DIR, N_SHUFFLE,
                               SEED, covariates, cv_sse, folds, natural_spline, ols, session_table)
@@ -145,7 +144,6 @@ def run_session(key):
 
     _, resid = ols(C, Y)
     z_raw, z_part = state_means(Y, state), state_means(resid, state)
-    z_search = state_means(Y, state, (tab['epoch'] == epochs.SEARCH).to_numpy())
     counts = np.column_stack([r.pop('_counts') for r in rows])
     hz = state_means(counts, state) / (BIN_MS / 1e3)
     n_k = [(state == k).sum() for k in range(N_STATES)]
@@ -157,7 +155,6 @@ def run_session(key):
                    dr2_sniff_state=r2['cov_spl_state'][j] - r2['cov_state'][j], pref_state=pref[j],
                    **{f'z_{k}': z_raw[k, j] for k in range(N_STATES)},
                    **{f'partial_z_{k}': z_part[k, j] for k in range(N_STATES)},
-                   **{f'search_z_{k}': z_search[k, j] for k in range(N_STATES)},
                    **{f'rate_hz_{k}': hz[k, j] for k in range(N_STATES)},
                    **{f'n_bins_{k}': n_k[k] for k in range(N_STATES)})
 
@@ -165,9 +162,7 @@ def run_session(key):
                 r_sniff_slow_logspeed=np.corrcoef(slow(tab, 'sniff_hz'), slow(tab.assign(speed=log_sp), 'speed'))[0, 1])
     for k in range(N_STATES):
         m = state == k
-        srow.update({f'share_{k}': m.mean(), f'sniff_hz_{k}': f[m].mean(), f'speed_{k}': tab.loc[m, 'speed'].median(),
-                     **{f'{name}_{k}': (tab.loc[m, 'epoch'] == e).mean()
-                        for name, e in zip(epochs.EPOCHS, (epochs.SEARCH, epochs.RETRIEVAL, epochs.CONSUMPTION))}})
+        srow.update({f'share_{k}': m.mean(), f'sniff_hz_{k}': f[m].mean(), f'speed_{k}': tab.loc[m, 'speed'].median()})
     print(f'{key}: {len(rows)} units, {n} bins', flush=True)
     return rows, srow
 

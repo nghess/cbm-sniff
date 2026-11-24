@@ -18,6 +18,8 @@ sniff_params.mat, this computes:
   - peak latency: time of the peak of the sniff field's max projection across rows (the trace
     above the sniff field plot), from a port of matlab/sniff_fielder16.m.
 
+Only sniffs wholly in the search epoch are scored (spatial_info.SearchFrames).
+
 Sniff and spike times are handled exactly as in matlab/sniff_raster.m, so latencies match the
 rasters (including the 1-sample offset of i_locs noted in make_sniff_params.py).
 
@@ -34,6 +36,8 @@ import numpy as np
 import pandas as pd
 import scipy.io
 from scipy.ndimage import gaussian_filter
+
+from spatial_info import SearchFrames
 
 SNIFF_DIR = 'E:/cbm-odor/sniff/'  # <mouse>/<session>/sniff_params.mat
 KS_ROOT = 'E:/cbm-odor/'  # phy-curated spikes in <region>-ks/<mouse>/<session>/
@@ -142,6 +146,8 @@ def score_region(args):
     # as in sniff_raster.m: only sniffs before the last spike (MATLAB's uint64 division rounds)
     last = (int(spike_times[-1]) + 15) // 30
     locs, durs = all_locs[all_locs < last], all_durs[all_locs < last]
+    in_search = SearchFrames(mouse, session).mask(locs, locs + np.minimum(durs, WINDOW_MS))
+    locs, durs = locs[in_search], durs[in_search]
     env = np.minimum(durs, WINDOW_MS)
     edges = np.arange(0, WINDOW_MS + bin_ms / 2, bin_ms)
     occ = occupancy(env, edges)

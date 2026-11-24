@@ -63,17 +63,17 @@ join one-to-one. They read the MATLAB sniff params in `sniff/`.
 | Script | Output | What it scores |
 |---|---|---|
 | `sniff_locking.py` | `sniff/sniff_locking.csv` | Sniff locking: Skaggs information between spiking and latency from inhalation, shuffle-corrected (`info_z`, `info_p`), and the peak latency of the sniff field |
-| `spatial_info.py` | `sniff/spatial_info.csv`, `spatial_info_<epoch>.csv` | Place tuning: Skaggs spatial information and its shuffle z-score (`ssi`), for the whole session and per behavioral epoch |
+| `spatial_info.py` | `sniff/spatial_info_<epoch>.csv` | Place tuning: Skaggs spatial information and its shuffle z-score (`ssi`), for the search and retrieval epochs separately |
 | `position_locking.py` | `sniff/position_locking_<epoch>.csv` (ob), `position_locking_hc_<epoch>.csv` (hc, from `--regions hc --out E:/cbm-odor/sniff/position_locking_hc.csv`) | Whether position changes a unit's sniff-locking beyond its rate: `interaction_*` (any change in the latency profile) and `timing_*` (a change in when in the sniff it fires) |
-| `sniff_rate_map.py` | `sniff/sniff_rate_map_<epoch>.csv` (`all`, `search`, `retrieval`; ob and hc) | Place tuning per second vs per sniff: `si_rate` (usual SI, spikes / occupancy) and `si_sniff` (spikes / sniffs, i.e. the rate map divided by the sniff-rate map), each with a shuffle z and p; `r_rate_sniff`, how closely the rate map follows the sniff-rate map; `si_sniffing`, how unevenly the session's sniff rate is spread over the arena |
+| `sniff_rate_map.py` | `sniff/sniff_rate_map_<epoch>.csv` (`search`, `retrieval`; ob and hc) | Place tuning per second vs per sniff: `si_rate` (usual SI, spikes / occupancy) and `si_sniff` (spikes / sniffs, i.e. the rate map divided by the sniff-rate map), each with a shuffle z and p; `r_rate_sniff`, how closely the rate map follows the sniff-rate map; `si_sniffing`, how unevenly the session's sniff rate is spread over the arena |
 | `sniff_rate_model.py` | `sniff/sniff_rate_model.csv`, `sniff_rate_tuning.npz`, `sniff_rate_sessions.csv` (ob and hc) | Firing rate against sniff rate (below) |
 
 ### Firing rate and sniff rate
 
-`sniff_rate_model.py` asks whether a unit's z-scored rate (250 ms bins) follows sniff rate beyond running speed,
-epoch and drift. Per session, all units are fit at once by least squares:
+`sniff_rate_model.py` asks whether a unit's z-scored rate (250 ms search bins) follows sniff rate beyond running
+speed and drift. Per session, all units are fit at once by least squares:
 
-- `cov`: epoch + body speed (SLEAP centroid, natural spline) + time in session (natural spline)
+- `cov`: body speed (SLEAP centroid, natural spline) + time in session (natural spline)
 - `cov_lin`: `cov` plus a line in sniff rate
 - `cov_spl`: `cov` plus a natural cubic spline in sniff rate (4 df)
 - `lin` and `spl`: the line and the spline in sniff rate alone
@@ -84,7 +84,6 @@ Every model is scored by cross-validated R² over 5 folds of interleaved 30 s bl
 - `nonlin_gain`: the spline's R² minus the line's
 - `p_lin` and `p_spl`: shift tests that circularly shift the sniff rate against everything else (200 shifts of at least 30 s)
 - `slope_hz` (raw) and `slope_partial_hz` (beyond covariates): z per Hz
-- `slope_<epoch>_hz`: the slope within each epoch
 - `r_sniff`: the correlation between z and sniff rate
 
 Sniff rate is the time-weighted 1 / inhalation interval from the MATLAB params. Intervals touching a rejected
@@ -101,15 +100,15 @@ the CSV. This script takes events, epochs and units from `cbmcore`.
 numbered by sniff rate, 0 slowest). It uses `sniff_rate_model.py`'s bins, z, covariates, folds and cross-validated R².
 Each 250 ms bin takes the state of its nearest frame. The state (two dummies) is scored on top of three baselines:
 
-- `dr2_state`: beyond `cov` (epoch, speed, time)
+- `dr2_state`: beyond `cov` (speed, time)
 - `dr2_state_sniff`: beyond `cov` + a spline in sniff rate
 - `dr2_state_slow`: beyond `cov` + splines in sniff rate and log speed averaged over 10 s, the HMM's own time scale
 
 Each has a `p_*` from circularly shifting the state sequence against everything else (200 shifts of at least
 60 s). `dr2_sniff_state` is what sniff rate adds beyond `cov` + state. Per state `k`: `z_<k>`, `partial_z_<k>`
-(residual after `cov`), `search_z_<k>` (search bins only), `rate_hz_<k>`, `n_bins_<k>`, and `pref_state`.
+(residual after `cov`), `rate_hz_<k>`, `n_bins_<k>`, and `pref_state`.
 Outputs are `sniff/sniff_hmm_model.csv` (keyed like the other scores) and `sniff/sniff_hmm_sessions.csv` (each state's
-share, sniff rate, speed and epochs per session).
+share, sniff rate and speed per session).
 
     python sniff_hmm_model.py [--sessions 9008/x5 ...] [--out DIR] [--workers N]
 
@@ -163,6 +162,11 @@ discriminant reproduces them; the labels are putative.
 
     python mt_classifier.py [--sessions 9000/o2 ...] [--n-random 200]
 
+Its discriminant crashes the `sldata` env, whose `scipy.linalg` is broken. Until that is repaired, run it in base Anaconda
+with cbmcore on the path (`$env:PYTHONPATH = 'd:/code/cbm-core/src'`, then `C:/ProgramData/anaconda3/python.exe mt_classifier.py`).
+`sniff_raster.py` has the same problem through `savgol_filter`: in `sldata` its workers crash and the pool hangs. The
+cause and the fix (`MKL_THREADING_LAYER=TBB`) are in `cbm-qc/CBM_PROJECTS.md` under "Python env".
+
 ### Screening OB units (ob)
 
 `ob_screening.py` screens ob units for cell bodies outside the glomerular layer, after
@@ -199,10 +203,22 @@ It needs `ob_lfp.npy` (`make_hc_lfp.py --region ob`) and the raw `continuous.dat
 
     python ob_screening.py [--sessions 9000/o2 ...] [--workers 4] [--relabel]
 
-Behavioral epochs (`spatial_info.compute_epochs`): **search** is ITI and search until the reward
-cue, **retrieval** is cue until the animal pokes a port. Consumption is excluded. This is the older,
-edge-triggered copy of the epochs. `sniff_rate_model.py` uses `cbmcore.label_epochs` instead, where retrieval
-starts when `target_cell` goes blank (see cbm-core's README for why).
+Behavioral epochs come from `cbmcore.label_epochs` (through `spatial_info.frame_epochs`): **search** is the ITI and
+search until the target is found, and **retrieval** runs from the find until the animal pokes a port. Consumption is
+excluded. These scripts used an older edge-triggered copy until Nov 23, 2026. `spatial_info_<epoch>.csv`,
+`position_locking_*` and `sniff_rate_map_<epoch>.csv` were rerun with cbmcore's labels that day; the older
+whole-session `spatial_info.csv`, `sniff_rate_map_all.csv` and `position_locking.csv` were retired (copies in
+`E:/cbm-odor/_pre_search_fix_2026-11-23/`).
+
+Retrieval is short under these labels (about 3 min per session, in 1-2 s bouts), so `position_locking.py` keeps a
+median of only 2 position bins per session in retrieval. A session with fewer than 2 bins that reach
+`MIN_SNIFFS_PER_BIN` is left unscored (NaN): 82 of 119 sessions and 435 of 1,968 OB units have retrieval scores, and
+those are at chance.
+
+**Search only (Nov 23, 2026).** Sniff locking, theta locking, the M/T classifier, the sniff rasters and the sniff measures of
+the OB screen use only sniffs or theta cycles wholly in the search epoch (`spatial_info.SearchFrames`). The sniff-rate and
+HMM models use only 250 ms bins whose every frame is search. The flip-state figures leave out the ITI. The screen's unit-quality measures still use the whole
+recording. Retrieval tables are separate from search and are used only for explicit search-against-retrieval comparisons.
 
 ### 4. Figures and notebooks
 
@@ -218,8 +234,8 @@ The `.py` files are in `sniff-raster-python/`. The notebooks are at the top leve
 | `6_mt_classifier.ipynb` | Results of `mt_classifier.py`: counts per mouse, the phase mixture, histograms by class, and validation (leave-one-out vs randomly aligned, odd vs even sniffs) |
 | `7_mt_spatial.ipynb` | Whether putative mitral, tufted or other units are more often spatially significant (SSI, SI per second, SI per sniff; by epoch), pooled, within mouse, and in a logistic regression with mouse fixed effects and spike count; and how the types are distributed across mice and sessions |
 | `7b_ob_unit_screening.ipynb` | Results of `ob_screening.py`: units removed by each criterion, single-unit quality, waveform polarity and width against the internal reference, why polarity only makes a unit ambiguous, tetrodes whose wires look the same, footprint and SNR, LFP per tetrode, OSN-terminal and juxtaglomerular signatures, the screen against the M/T labels (within mouse, and by sniff peak latency), and example units |
-| `8_sniff_rate_model.ipynb` | Results of `sniff_rate_model.py`: how sniff rate differs by epoch and tracks speed, how many units sniff rate explains beyond behavior, line vs curve, the shape of partial tuning curves, direction within each epoch, unit types (with within-mouse checks), every mouse, and example units |
-| `9_sniff_hmm_firing.ipynb` | Results of `sniff_hmm_model.py`: the 3-state sniff HMM states in the bins, how many units the state explains beyond behavior, beyond sniff rate and beyond 10 s sniff rate and speed, state vs sniff rate per unit, which state units prefer (raw, partial, search only), unit types (with within-mouse checks), every mouse, and example units |
+| `8_sniff_rate_model.ipynb` | Results of `sniff_rate_model.py`: how sniff rate tracks speed, how many units sniff rate explains beyond behavior, line vs curve, the shape of partial tuning curves, direction, unit types (with within-mouse checks), every mouse, and example units |
+| `9_sniff_hmm_firing.ipynb` | Results of `sniff_hmm_model.py`: the 3-state sniff HMM states in the bins, how many units the state explains beyond behavior, beyond sniff rate and beyond 10 s sniff rate and speed, state vs sniff rate per unit, which state units prefer (raw, partial), unit types (with within-mouse checks), every mouse, and example units |
 
 `flip_state_plots.py` makes a per-unit figure split by trial `flip_state` (0/1/2) within one epoch: place maps,
 sniff-latency profiles, and the latency profile by position along the arena's long (y) axis. It saves one PNG per

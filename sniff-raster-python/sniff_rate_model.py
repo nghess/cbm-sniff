@@ -1,19 +1,19 @@
-"""How each unit's firing rate depends on sniff rate, alone and beyond running speed, epoch and time.
+"""How each unit's firing rate depends on sniff rate during search, alone and beyond running speed and time.
 
-Time is cut into BIN_MS bins over the tracked session (bins more than MAX_FRAME_GAP_MS from any frame,
-and bins in the UNSPLIT epoch, are dropped). Per bin:
+Time is cut into BIN_MS bins over the tracked session. Only bins whose every frame is in the search epoch are
+kept (cbmcore.label_epochs), and bins more than MAX_FRAME_GAP_MS from any frame are dropped. Per bin:
   - z: the unit's spike count, z-scored over the session's kept bins
   - sniff rate (Hz): the time-weighted mean of 1 / (inhalation-to-inhalation interval) over the bin, from
     the good inhalations of the MATLAB sniff params (SNIFF_DIR, as sniff_locking.py). Intervals that
     start or end on a rejected inhalation, or that imply a rate outside SNIFF_HZ, are missing; bins less
     than MIN_SNIFF_COVER covered by valid intervals are dropped.
-  - covariates: epoch (cbmcore.label_epochs, nearest frame), body speed (SLEAP centroid, px/s,
-    log1p-transformed, clipped at its 99.5th percentile) and time in session.
+  - covariates: body speed (SLEAP centroid, px/s, log1p-transformed, clipped at its 99.5th percentile) and time in
+    session.
 
 Models, fit by least squares on z (all units of a session at once):
   lin       z ~ sniff                                   (linear)
   spl       z ~ ns(sniff, SNIFF_DF)                     (natural cubic spline)
-  cov       z ~ epoch + ns(speed, 3) + ns(time, 4)      (behavior and drift only)
+  cov       z ~ ns(speed, 3) + ns(time, 4)              (behavior and drift only)
   cov_lin   cov + sniff
   cov_spl   cov + ns(sniff, SNIFF_DF)
 Each is scored by cross-validated R^2: the session is cut into FOLD_BLOCK_S blocks dealt round-robin to
@@ -25,15 +25,13 @@ session's sniff rate.
   dr2_lin, dr2_spl: cv R^2 that sniff rate adds beyond cov (cov_lin - cov, cov_spl - cov)
   nonlin_gain:      cov_spl - cov_lin (> 0: a curve predicts held-out data better than a line)
   p_lin, p_spl:     dr2 against a null that circularly shifts the sniff rate (by at least MIN_SHIFT_S)
-                    against everything else, N_SHUFFLE times. The unit's relation to speed, epoch and
-                    drift is kept; only its alignment with sniffing is broken.
+                    against everything else, N_SHUFFLE times. The unit's relation to speed and drift
+                    is kept; only its alignment with sniffing is broken.
   slope_hz, slope_partial_hz: z per Hz of sniff rate in lin and in cov_lin (in-sample)
-  slope_<epoch>_hz: z per Hz within that epoch's bins alone
   r_sniff:          Pearson r between z and sniff rate
 
 Also saves, aligned row for row with the CSV, tuning curves of mean z (raw, and the residual after cov)
-in 1 Hz sniff-rate bins (TUNING_EDGES), and a per-session CSV of sniff rate by epoch and its correlation
-with speed.
+in 1 Hz sniff-rate bins (TUNING_EDGES), and a per-session CSV of sniff rate and its correlation with speed.
 
 Usage:
     python sniff_rate_model.py [--sessions 9008/x5 ...] [--out DIR] [--workers N]
@@ -124,17 +122,21 @@ def session_table(mouse, session):
     speed = np.bincount(fb[inb], v[inb], len(centres)) / np.maximum(np.bincount(fb[inb], minlength=len(centres)), 1)
     speed[np.bincount(fb[inb], minlength=len(centres)) == 0] = np.nan
 
+    inside = (fb >= 0) & (fb < len(centres))
+    n_frames = np.bincount(fb[inside], minlength=len(centres))
+    n_search = np.bincount(fb[inside], (ev['epoch'].to_numpy() == epochs.SEARCH)[inside].astype(float), len(centres))
+    search = (n_frames > 0) & (n_search == n_frames)   # every frame of the bin is search
+
     sniff, cover = load_sniff_rate(mouse, session, edges)
     tab = pd.DataFrame(dict(start=edges[:-1], sniff_hz=sniff, epoch=ev['epoch'].to_numpy()[i], speed=speed,
                             time_s=(centres - t[0]) / 1e3))
-    keep = near & (cover >= MIN_SNIFF_COVER) & (tab['epoch'] != epochs.UNSPLIT) & tab['speed'].notna()
+    keep = near & search & (cover >= MIN_SNIFF_COVER) & tab['speed'].notna()
     return tab[keep.to_numpy()].reset_index(drop=True), edges
 
 
 def covariates(tab):
     sp = np.log1p(np.minimum(tab['speed'], np.nanpercentile(tab['speed'], 99.5)))
-    ep = np.column_stack([(tab['epoch'] == e).to_numpy(float) for e in (epochs.RETRIEVAL, epochs.CONSUMPTION)])
-    return np.column_stack([ep, natural_spline(sp.to_numpy(), 3), natural_spline(tab['time_s'].to_numpy(), 4)])
+    return np.column_stack([natural_spline(sp.to_numpy(), 3), natural_spline(tab['time_s'].to_numpy(), 4)])
 
 
 def folds(time_s):
@@ -225,23 +227,17 @@ def run_session(key):
     _, resid_cov = ols(C, Y)
     fz = (f - f.mean()) / f.std()
     r_sniff = (Y * fz[:, None]).mean(0)
-    ep_slopes = {}
-    for name, e in zip(epochs.EPOCHS, (epochs.SEARCH, epochs.RETRIEVAL, epochs.CONSUMPTION)):
-        m = (tab['epoch'] == e).to_numpy()
-        ep_slopes[name] = ols(f[m, None], Y[m])[0][1] if m.sum() >= 4 * lo else np.full(Y.shape[1], np.nan)
 
     for j, row in enumerate(rows):
         row.update(n_bins=n, **{f'cv_r2_{k}': v[j] for k, v in r2.items()},
                    dr2_lin=dr2_lin[j], dr2_spl=dr2_spl[j], nonlin_gain=r2['cov_spl'][j] - r2['cov_lin'][j],
                    p_lin=p_lin[j], p_spl=p_spl[j], slope_hz=b_lin[1, j], slope_partial_hz=b_cl[-1, j],
-                   r_sniff=r_sniff[j], **{f'slope_{e}_hz': ep_slopes[e][j] for e in epochs.EPOCHS})
+                   r_sniff=r_sniff[j])
     curves = np.stack([tuning(f, Y), tuning(f, resid_cov)], axis=1)  # (unit, raw/partial, bin)
 
     sp = np.log1p(tab['speed'])
     srow = dict(mouse=mouse, session=session, n_bins=n, sniff_hz_mean=f.mean(), sniff_hz_sd=f.std(),
-                r_sniff_logspeed=np.corrcoef(f, sp)[0, 1],
-                **{f'sniff_hz_{name}': f[(tab['epoch'] == e).to_numpy()].mean()
-                   for name, e in zip(epochs.EPOCHS, (epochs.SEARCH, epochs.RETRIEVAL, epochs.CONSUMPTION))})
+                r_sniff_logspeed=np.corrcoef(f, sp)[0, 1])
     print(f'{key}: {len(rows)} units, {n} bins', flush=True)
     return rows, curves, srow
 
