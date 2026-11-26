@@ -38,6 +38,11 @@ the smoothed signal, and a row in `sniff_inventory.csv` saying whether the sessi
 was rejected.
 
     python make_sniff_params.py [--sessions 9000/o2 ...] [--redo]
+    python make_sniff_params.py --experiment cbm-vision      # E:/cbm-vision/preprocessed/ -> E:/cbm-vision/sniff_py/
+
+`--experiment` (default `cbm-odor`) sets the `preprocessed/`, `events/` and `sniff_py/` folders. It was run on cbm-vision on
+Nov 24, 2026, for cbm-direction: 50 of 63 sessions saved, 9004's 11 rejected as always, and 9000-v0 and 9002-v0 rejected for
+too many bad sniffs. It needs base Anaconda (`C:/ProgramData/anaconda3/python.exe`), because `savgol_filter` crashes `sldata`.
 
 `compare_sniff_params.py` compares the Python outputs (`sniff_py/`) with the MATLAB ones (`sniff/`)
 session by session and writes `sniff_py/validation.csv`.

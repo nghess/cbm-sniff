@@ -11,7 +11,9 @@ the outputs can be compared with the MATLAB ones:
   - rejected inhalations appear as rows with e_locs, in_amps and ex_amps set to 0
 
 Usage:
-    python make_sniff_params.py [--out-dir DIR] [--redo] [--sessions 9000/o2 9004/x12]
+    python make_sniff_params.py [--experiment cbm-odor] [--out-dir DIR] [--redo] [--sessions 9000/o2 9004/x12]
+
+--experiment sets the folders under E:/ (default cbm-odor): <experiment>/preprocessed/, events/ and sniff_py/.
 """
 import argparse
 import glob
@@ -270,10 +272,14 @@ def process_session(sniff_file, out_dir, redo=False):
 
 def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument('--out-dir', default=OUT_DIR)
+    ap.add_argument('--experiment', default='cbm-odor', help='E:/<experiment>/ (default cbm-odor)')
+    ap.add_argument('--out-dir', help='default E:/<experiment>/sniff_py/')
     ap.add_argument('--redo', action='store_true', help='reprocess sessions that already have sniff_params.npy')
     ap.add_argument('--sessions', nargs='*', help='only these <mouse>/<session> (default: all)')
     args = ap.parse_args()
+    global SRC, EVENTS_DIR
+    SRC, EVENTS_DIR = f'E:/{args.experiment}/preprocessed/', f'E:/{args.experiment}/events/'
+    args.out_dir = args.out_dir or f'E:/{args.experiment}/sniff_py/'
 
     files = sorted(glob.glob(os.path.join(SRC, '**', 'sniff.npy'), recursive=True))
     if args.sessions:
